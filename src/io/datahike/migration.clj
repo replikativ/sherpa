@@ -4,7 +4,8 @@
             [clojure.data :as data]
             [clojure.java.io :as io]
             [taoensso.timbre :as log])
-  (:import [java.io BufferedWriter OutputStream]))
+  (:import [java.io BufferedWriter OutputStream]
+           (java.text DateFormat)))
 
 (log/set-level! :warn)
 
@@ -39,39 +40,56 @@
        [?e :name _]]
      @conn)
 
-(do
-  (time (doall (repeatedly 1000 (fn [] (d/transact conn (vec (repeatedly 100 (fn [] {:age (long (rand-int 10000))
+(defn load-test-db []
+  (time (doall (repeatedly 1000 (fn [] (d/transact conn (vec (repeatedly 1000 (fn [] {:age  (long (rand-int 10000))
                                                                                      :name (str (rand-int 10000))}))))))))
   true)
 
 (defn get-txs [conn]
-  (sort-by :db/id (d/q '[:find [(pull ?t [*]) ...]
-                         :where
-                         [?e _ _ ?t]]
-                       @conn)))
-
-(last (get-txs conn))
+  (->> (d/q '[:find [(pull ?t [*]) ...]
+              :where
+              [?e _ _ ?t]]
+            @conn)
+       (remove #(#{#inst"1970-01-01T00:00:00.000-00:00"} (:db/txInstant %)))
+       (sort-by :db/id)))
 
 (defn find-tx-datoms [conn tx]
   (let [query (cond->
                 '{:find  [?e ?a ?v ?t ?s]
                   :in    [$ ?t]
-                  :where [[?e ?a ?v ?t ?s]]}
+                  :where [[?e ?a ?v ?t ?s]
+                          [(not= ?e ?t)]]}
                 (-> @conn :config :attribute-refs?) (assoc :where '[[?e ?aid ?v ?t ?s]
-                                                                    [?aid :db/ident ?a]]))]
+                                                                    [?aid :db/ident ?a]
+                                                                    [(not= ?e ?t)]]))]
     (into []
           (sort-by first (d/q query
                               (d/history @conn) tx)))))
 
-(find-tx-datoms conn 536870912)
+(->> (get-txs conn)
+     last
+     :db/id
+     (find-tx-datoms conn)
+     )
 
-(datahike.db.search/search-current-indices @conn [nil nil nil 536871913 nil])
-(datahike.db.search/search-temporal-indices @conn [nil nil nil 536871913 nil])
+(into [[123 45234]]
+      (find-tx-datoms conn 536870913))
 
-(:rschema @conn)
+(sort-by first (d/q '[:find (count ?e)
+                      :in $
+                      :where
+                      [?e ?a ?v ?t false]]
+                    (d/history @conn)
+                    ))
 
-(require '[datahike.db.utils :as dbu])
-(require '[datahike.db.interface :as dbi])
+(->> (d/q '[:find ?a
+            :where
+            [?e :age ?a]] (d/history @conn))
+     (map first)
+     (into #{})
+     count)
+
+(load-test-db)
 
 (defn export-db [conn filename]
   (let [txs (get-txs conn)]
@@ -79,12 +97,13 @@
       (.write out (cbor/encode (dissoc (:config @conn) :store)))
       (.write out (cbor/encode (:meta @conn)))
       (doseq [{:keys [db/id db/txInstant]} txs]
-        (.write out (cbor/encode (into [[id txInstant]] (find-tx-datoms conn id))))))))
+        (.write out (cbor/encode (into [[id txInstant]]
+                                       (find-tx-datoms conn id))))))))
 
 (def cfg2 {:store {:backend :mem
                    :id "imported"}
            :keep-history? true
-           :schema-flexibility :read
+           :schema-flexibility :write
            :index :datahike.index/persistent-set
            :attribute-refs? true})
 
@@ -104,13 +123,23 @@
 (let [[old-cfg old-meta & txs] (cbor/slurp-all "db_export.cbor")
       new-cfg (:config @conn2)]
   (if (compatible-cfg? old-cfg new-cfg)
-    (doseq [tx txs]
-      (d/transact conn2 {:tx-data (map (fn [tx-data] (into [:db/add] tx-data)) tx)}))
+    (doseq [[[tid txInstant] & tx-data]  txs]
+      (let [ident-ref-map (:ident-ref-map @conn2)]
+        (d/transact conn2 {:tx-data (map (fn [datom] (into [:db/add]
+                                                           (update datom 1 (fn [a] (ident-ref-map a))))) tx-data)
+                           :tx-meta {:db/txInstant (java.util.Date/from txInstant)}})))
     (throw (ex-info "Incompatible configuration!" {:type :incompatible-config
                                                    :imported-config old-cfg
                                                    :config (:config @conn2)
                                                    :cause (data/diff (dissoc old-cfg :store)
                                                                      (dissoc new-cfg :store))}))))
+
+(with-out-str (clojure.pprint/pprint @conn))
+
+(d/q '[:find (count ?e)
+       :where [?e _ _ _]]
+     @conn2)
+
 
 (def imported (cbor/slurp-all "db_export.cbor"))
 

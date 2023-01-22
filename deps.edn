@@ -1,8 +1,10 @@
 {:paths   ["src" "resources"]
  :deps    {org.clojure/clojure    {:mvn/version "1.10.3"}
-           io.replikativ/datahike {:mvn/version "0.6.1530"}
+           io.replikativ/datahike {:mvn/version "0.6.1531"}
            mvxcvi/clj-cbor        {:mvn/version "1.1.1"}}
- :aliases {:dev   {:extra-deps {hashp/hashp {:mvn/version "0.2.2"}}}
+ :aliases {:dev   {:extra-paths ["env/dev"]
+                   :extra-deps {hashp/hashp {:mvn/version "0.2.2"}
+                                com.gfredericks/user.clj {:mvn/version "0.1.0"}}}
            :test  {:extra-paths ["test"]
                    :extra-deps  {org.clojure/test.check {:mvn/version "1.1.1"}
                                  io.github.cognitect-labs/test-runner
