@@ -1,0 +1,9 @@
+{:min-bb-version "0.8.0"
+ :deps {migration/bb {:local/root "bb"}}
+ :tasks {:requires [[clojure.edn :as edn]
+                    [tools.migrate :as migrate]]
+         migrate {:doc "Migrate from specific datahike version to latest"
+                  :task (apply migrate/-main *command-line-args*)}
+         create-test-data {:doc "Creates test data"
+                           :task (apply migrate/create-test-db *command-line-args*)} }}
+

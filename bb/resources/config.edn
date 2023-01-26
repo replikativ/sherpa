@@ -1,0 +1,2 @@
+{:store {:backend :mem
+         :id "foo"}}
