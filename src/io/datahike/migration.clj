@@ -28,7 +28,8 @@
               :db/cardinality :db.cardinality/one
               :db/valueType :db.type/long}])
 
-(defn load-test-db [config]
+(defn load-test-db [{:keys [config tx-count]
+                     :or {tx-count 100}}]
   (when-not (d/database-exists?)
     (println "Creating test database...")
     (d/create-database config)
@@ -40,17 +41,15 @@
     (println "Creating test data...")
     (time
      (doall
-      (repeatedly 10
+      (repeatedly tx-count
                   (fn []
                     (d/transact conn (vec
                                       (repeatedly 100
-                                                  (fn [] {:age  (long (rand-int 10000))
-                                                          :name (str (rand-int 10000))}))))))))
+                                                  (fn [] {:age  (long (rand-int (* 100 tx-count)))
+                                                          :name (str (rand-int (* 100 tx-count)))}))))))))
+    (println (format "%s random user datoms in %s transactions generated." (* tx-count 100 2) tx-count))
     (println "Done.")
     true))
-
-(defn ping [x]
-  (println (format "PING: %s" (str x))))
 
 (defn get-txs [conn]
   (->> (d/q '[:find [(pull ?t [*]) ...]
@@ -83,13 +82,19 @@
          (into []))))
 
 (defn extract-db [conn filename]
-  (let [txs (get-txs conn)]
+  (let [_ (println "Extracting transactions...")
+        start-time (System/currentTimeMillis)
+        txs (get-txs conn)
+        _ (println "Done.")]
+    (println (format "Writing %s transactions to %s..." (count txs) filename))
     (with-open [^OutputStream out (io/output-stream (io/file filename))]
       (.write out (cbor/encode (dissoc (:config @conn) :store)))
       (.write out (cbor/encode (:meta @conn)))
       (doseq [{:keys [db/id db/txInstant]} txs]
         (.write out (cbor/encode (into [[id txInstant]]
-                                       (find-tx-datoms conn id))))))))
+                                       (find-tx-datoms conn id))))))
+    (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
+    (println "Done.")))
 
 (defn export-db [{:keys [config filename]}]
   (if (d/database-exists? config)
@@ -98,8 +103,8 @@
     (throw (ex-info "Database does not exist." {:config config}))))
 
 (defn compatible-cfg? [old-cfg new-cfg]
-  (let [[in-old in-new _] (data/diff (dissoc old-cfg :store :name :attribute-refs?)
-                                     (dissoc new-cfg :store :name :attribute-refs?))]
+  (let [[in-old in-new _] (data/diff (select-keys old-cfg [:keep-history? :schema-flexibility])
+                                     (select-keys new-cfg [:keep-history? :schema-flexibility]))]
     (and (nil? in-old)
          (nil? in-new))))
 
@@ -123,27 +128,43 @@
             txs)))
 
 (defn load-db [conn filename]
-  (time (let [[old-cfg _old-meta & txs] (cbor/slurp-all filename)
-              cfg (:config @conn)
-              ident-map (atom {})]
-          (if (compatible-cfg? old-cfg cfg)
-            (doseq [[[_tid txInstant] & datoms] txs]
-              (let [tx-data (prepare-tx-data conn datoms ident-map)
-                    tx-meta {:db/txInstant (java.util.Date/from txInstant)}]
-                (d/transact conn {:tx-data tx-data
-                                  :tx-meta tx-meta})))
-            (throw (ex-info "Incompatible configuration!" {:type            :incompatible-config
-                                                           :imported-config old-cfg
-                                                           :config          (:config @conn)
-                                                           :cause           (data/diff (dissoc old-cfg :store)
-                                                                                       (dissoc cfg :store))}))))))
+  (log/set-level! :warn)
+  (let [start-time (System/currentTimeMillis)
+        _ (println (format "Reading transactions from %s..." filename))
+        [old-cfg _old-meta & txs] (cbor/slurp-all filename)
+        _ (println "Done.")
+        cfg (:config @conn)
+        ident-map (atom {})
+        counter (atom 0)]
+    (if (compatible-cfg? old-cfg cfg)
+      (do
+        (println "Importing transactions ...")
+        (doseq [[[_tid txInstant] & datoms] txs]
 
-(defn import-db [config exported-db-path]
+          (let [tx-data (prepare-tx-data conn datoms ident-map)
+                tx-meta {:db/txInstant (java.util.Date/from txInstant)}]
+            (d/transact conn {:tx-data tx-data
+                              :tx-meta tx-meta}))
+          (when (= 0 (mod @counter 10))
+            (println (format "%s transactions imported." @counter)))
+          (swap! counter inc))
+        (println (format "Total transactions imported: %s" @counter))
+        (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
+        (println "Done."))
+      (throw (ex-info "Incompatible configuration!" {:type            :incompatible-config
+                                                     :imported-config old-cfg
+                                                     :config          (:config @conn)
+                                                     :cause           (data/diff (dissoc old-cfg :store)
+                                                                                 (dissoc cfg :store))})))))
+
+(defn import-db [{:keys [config export-file]}]
   (if (d/database-exists? config)
     (throw (ex-info "Target database already exists." {:config config}))
-    (let [conn (do (d/create-database config)
+    (let [conn (do (println "Creating database...")
+                   (d/create-database config)
+                   (println "Done.")
                    (d/connect config))]
-      (load-db conn exported-db-path))))
+      (load-db conn export-file))))
 
 (comment
 
@@ -153,7 +174,7 @@
                     :id "export"}
             :keep-history? true
             :schema-flexibility :write
-            :index :datahike.index/persistent-set
+            :index :datahike.index/hitchhiker-tree
             :attribute-refs? true})
 
   (def conn (do
@@ -161,12 +182,34 @@
               (d/create-database cfg)
               (d/connect cfg)))
 
-  (load-test-db conn)
+  (def conn (d/connect cfg))
 
-  (export-db conn "db_export.cbor")
+  (count @conn)
+
+  (load-test-db {:config cfg :tx-count 10})
+
+  (get-txs conn)
+  (find-tx-datoms conn 536870913)
+
+  (d/q '{:find  [?e ?a ?v ?t ?s]
+        :in    [$ ?t]
+        :where [[?e ?a ?v ?t ?s]
+                [(not= ?e ?t)]]}
+       (d/history @conn) 536870913)
+
+  (export-db {:config cfg
+              :filename "db_export2.cbor"})
+
+  (def cfg2 {:store {:backend :mem
+                     :id "import"
+                     ;; :path "/tmp/import.dh"
+                     }
+             :keep-history? true
+             :schema-flexibility :write
+             :index :datahike.index/persistent-set
+             :attribute-refs? true})
 
   (def cfg2 {:store {:backend :file
-                     ;;:id "import"
                      :path "/tmp/import.dh"}
              :keep-history? true
              :schema-flexibility :write
@@ -176,11 +219,12 @@
   (d/database-exists? cfg2)
   (d/delete-database cfg2)
 
-  (def import-path "1674757273892-datahike-export.cbor")
-
-  (import-db cfg2 "db_export.cbor")
+  (import-db {:config cfg2
+              :export-file "db_export2.cbor"})
 
   (def conn2 (d/connect cfg2))
+
+  (:config @conn2)
 
   ;
   )

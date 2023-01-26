@@ -1,4 +1,3 @@
 {:store {:backend :file
          :path "/tmp/export.dh"}
- :keep-history? true
- :attribute-refs? false}
+ :keep-history? true}

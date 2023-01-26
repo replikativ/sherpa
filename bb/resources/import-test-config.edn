@@ -1,0 +1,6 @@
+{:store {:backend :file
+         :path "/tmp/import.dh"}
+ :keep-history? true
+ :schema-flexibility :write
+ :index :datahike.index/persistent-set
+ :attribute-refs? true}
