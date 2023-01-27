@@ -36,7 +36,7 @@
                                                            :sibling [{:age  (long (rand-int (* 100 tx-count)))
                                                                       :name (str (rand-int (* 100 tx-count)))}]}))))
                      (when (= 0 (mod @counter 10))
-                       (println (format "%s %%" (str (float (* 100.0 (/ @counter tx-count)))))))
+                       (println (format "%.2f %%" (float (* 100.0 (/ @counter tx-count))))))
                      (swap! counter inc))))
       (println (format "%s entities in %s transactions generated." (d/q '[:find (count ?e) . :where [?e _ _ _]] @conn)  tx-count))
       (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0))))

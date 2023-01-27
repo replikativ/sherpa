@@ -65,7 +65,7 @@
         (.write out (cbor/encode (into [[id txInstant]]
                                        (find-tx-datoms conn id))))
         (when (= 0 (mod @counter 10))
-          (println (format "%s %%" (str (float (* 100.0 (/ @counter tx-count)))))))
+          (println (format "%.2f %%" (float (* 100.0 (/ @counter tx-count))))))
         (swap! counter inc)))
     (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
     (println "Done.")))
