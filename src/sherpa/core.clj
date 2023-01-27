@@ -1,4 +1,4 @@
-(ns io.datahike.migration
+(ns sherpa.core
   (:require
    [clj-cbor.core :as cbor]
    [clojure.data :as data]
@@ -11,53 +11,13 @@
 
 (defn is-system-keyword? [value]
   (and (or (keyword? value) (string? value))
-       (if-let [ns (namespace (keyword value))]
-         (= "db" (first (string/split ns #"\.")))
+       (if-let [nmsp (namespace (keyword value))]
+         (= "db" (first (string/split nmsp #"\.")))
          false)))
 
-(def schema [{:db/ident :name
-              :db/cardinality :db.cardinality/one
-              :db/index true
-              :db/unique :db.unique/identity
-              :db/valueType :db.type/string}
-             {:db/ident :sibling
-              :db/cardinality :db.cardinality/many
-              :db/valueType :db.type/ref}
-             {:db/ident :age
-              :db/cardinality :db.cardinality/one
-              :db/valueType :db.type/long}])
-
-(defn load-test-db [{:keys [config tx-count]
-                     :or {tx-count 100}}]
-  (when-not (d/database-exists?)
-    (println "Creating test database...")
-    (d/create-database config)
-    (println "Done."))
-  (let [conn (d/connect config)]
-    (println "Creating test schema...")
-    (d/transact conn schema)
-    (println "Done.")
-    (println "Creating test data...")
-    (let [start-time (System/currentTimeMillis)
-          counter (atom 0)]
-      (doall
-       (repeatedly tx-count
-                   (fn []
-                     (d/transact conn (vec
-                                       (repeatedly 1000
-                                                   (fn [] {:age  (long (rand-int (* 100 tx-count)))
-                                                           :name (str (rand-int (* 100 tx-count)))
-                                                           :sibling [{:age  (long (rand-int (* 100 tx-count)))
-                                                                      :name (str (rand-int (* 100 tx-count)))}]}))))
-                     (when (= 0 (mod @counter 10))
-                       (println (format "%s %%" (str (float (* 100.0 (/ @counter tx-count)))))))
-                     (swap! counter inc))))
-      (println (format "%s entities in %s transactions generated." (d/q '[:find (count ?e) . :where [?e _ _ _]] @conn)  tx-count))
-      (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0))))
-    (println "Done.")
-    true))
-
-(defn get-txs [conn]
+(defn get-txs
+  "Find all transactions without system transactions, sorted by db/id."
+  [conn]
   (->> (d/q '[:find [(pull ?t [*]) ...]
               :where
               [?e _ _ ?t]]
@@ -65,7 +25,10 @@
        (remove #(#{#inst"1970-01-01T00:00:00.000-00:00"} (:db/txInstant %)))
        (sort-by :db/id)))
 
-(defn find-tx-datoms [conn tx]
+(defn find-tx-datoms
+  "Find all datoms given a database connection `conn` and a transaction id `tx`.
+    "
+  [conn tx]
   (let [db @conn
         attribute-refs?  (-> @conn :config :attribute-refs?)
         query (cond->
@@ -185,66 +148,3 @@
                    (d/connect config))]
       (load-db conn export-file))))
 
-(comment
-
-  (log/set-level! :warn)
-
-  (def cfg {:store {:backend :mem
-                    :id "export"}
-            :keep-history? true
-            :schema-flexibility :write
-            :index :datahike.index/persistent-set
-            :attribute-refs? true})
-
-  (def conn (do
-              (d/delete-database cfg)
-              (d/create-database cfg)
-              (d/connect cfg)))
-
-  (d/delete-database cfg)
-
-  (def cfg (slurp "bb/resources/import-test-config.edn"))
-
-  (def conn (d/connect cfg))
-
-  (load-test-db {:config cfg :tx-count 100})
-
-  (get-txs conn)
-
-  (find-tx-datoms conn 536870913)
-
-  (d/q '{:find  [?e ?a ?v ?t ?s]
-         :in    [$ ?t]
-         :where [[?e ?a ?v ?t ?s]
-                 [(not= ?e ?t)]]}
-       (d/history @conn) 536870914)
-
-  (find-tx-datoms conn 536870914)
-
-  (export-db {:config cfg
-              :filename "db_export2.cbor"})
-
-  (def cfg2 {:store {:backend :mem
-                     :id "import"
-                     ;; :path "/tmp/import.dh"
-                     }
-             :keep-history? true
-             :schema-flexibility :write
-             :index :datahike.index/persistent-set
-             :attribute-refs? false})
-
-  (d/database-exists? cfg2)
-  (d/delete-database cfg2)
-
-  (import-db {:config cfg2
-              :export-file "db_export2.cbor"})
-
-
-  (def conn2 (d/connect cfg2))
-
-  (:config @conn2)
-  [(take 20 (find-tx-datoms conn 536870914))
-   (take 20 (find-tx-datoms conn2 536870914))]
-
-  ;
-  )

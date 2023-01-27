@@ -1,4 +1,4 @@
-# io.datahike/migration
+# Sherpa
 
 FIXME: my new library.
 

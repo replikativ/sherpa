@@ -1,6 +1,6 @@
-(ns io.datahike.migration-test
+(ns sherpa.core-test
   (:require [clojure.test :refer :all]
-            [io.datahike.migration :refer :all]))
+            [sherpa.core :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."

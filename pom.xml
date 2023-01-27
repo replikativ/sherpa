@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>io.datahike</groupId>
-  <artifactId>migration</artifactId>
+  <groupId>io.replikativ</groupId>
+  <artifactId>sherpa</artifactId>
   <version>0.1.0-SNAPSHOT</version>
-  <name>io.datahike/migration</name>
-  <description>FIXME: my new library.</description>
-  <url>https://github.com/io.datahike/migration</url>
+  <name>sherpa</name>
+  <description>A set of tools to migrate all data between Datahike databases, including version support for older Datahike releases.</description>
+  <url>https://github.com/replikativ/sherpa</url>
   <licenses>
     <license>
       <name>Eclipse Public License</name>
@@ -19,9 +19,9 @@
     </developer>
   </developers>
   <scm>
-    <url>https://github.com/io.datahike/migration</url>
-    <connection>scm:git:git://github.com/io.datahike/migration.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/io.datahike/migration.git</developerConnection>
+      <url>https://github.com/replikativ/sherpa</url>
+    <connection>scm:git:git://github.com/replikativ/sherpa.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/replikativ/sherpa.git</developerConnection>
     <tag>v0.1.0-SNAPSHOT</tag>
   </scm>
   <dependencies>

@@ -1,5 +1,5 @@
 {:min-bb-version "0.8.0"
- :deps {migration/bb {:local/root "bb"}}
+ :deps {sherpa/bb {:local/root "bb"}}
  :tasks {:requires [[clojure.edn :as edn]
                     [tools.migrate :as migrate]]
          migrate {:doc "Migrate from specific datahike version to latest"

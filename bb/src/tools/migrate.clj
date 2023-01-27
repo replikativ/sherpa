@@ -1,7 +1,8 @@
 (ns tools.migrate
-  (:require [babashka.fs :as fs]
-            [clojure.edn :as edn]
-            [babashka.process :as p]))
+  (:require
+   [babashka.fs :as fs]
+   [babashka.process :as p]
+   [clojure.edn :as edn]))
 
 (defn clj [opts & args] (apply p/shell opts "clojure" args))
 
@@ -13,7 +14,7 @@
          "-Sdeps" (str (format
                         "{:deps {io.replikativ/datahike {:mvn/version \"%s\"}}}"
                         (or version "0.6.1531")))
-         "-X" "io.datahike.migration/load-test-db" db-args)))
+         "-X" "sherpa.utils/load-test-db" db-args)))
 
 (defn -main [version import-path export-path & _args]
   (let [export-file (format "/tmp/%s-datahike-%s.cbor" (str (System/currentTimeMillis)) "export")
@@ -27,27 +28,12 @@
          "-Sdeps" (str (format
                         "{:deps {io.replikativ/datahike {:mvn/version \"%s\"}}}"
                         (or version "0.6.1531")))
-         "-X" "io.datahike.migration/export-db" import-args)
+         "-X" "sherpa.core/export-db" import-args)
     (clj {:dir "."}
          "-Sdeps" (str (format
                         "{:deps {io.replikativ/datahike {:mvn/version \"RELEASE\"}}}"))
-         "-X" "io.datahike.migration/import-db" export-args)
+         "-X" "sherpa.core/import-db" export-args)
     (println "Cleaning up...")
     (fs/delete export-file)
     (println "Done.")))
-
-#_(comment
-  (def version "0.3.0")
-  (def config "bb/resources/import-test-config.edn")
-
-  (clj {:dir "."}
-       "-Sdeps" (str (format "{:deps {io.replikativ/datahike {:mvn/version \"%s\"}}" (or version "0.6.1531"))
-                     " :paths [\"src/io/datahike\"]}") 
-       "-X" "io.datahike.migration/ping" config)
-
-
-
-  )
-
-
 
