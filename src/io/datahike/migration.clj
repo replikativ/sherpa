@@ -3,10 +3,9 @@
    [clj-cbor.core :as cbor]
    [clojure.data :as data]
    [clojure.java.io :as io]
+   [clojure.string :as string]
    [datahike.api :as d]
-   [datahike.schema :as ds]
-   [taoensso.timbre :as log]
-   [clojure.string :as string])
+   [taoensso.timbre :as log])
   (:import
    [java.io OutputStream]))
 
@@ -39,15 +38,22 @@
     (d/transact conn schema)
     (println "Done.")
     (println "Creating test data...")
-    (time
-     (doall
-      (repeatedly tx-count
-                  (fn []
-                    (d/transact conn (vec
-                                      (repeatedly 100
-                                                  (fn [] {:age  (long (rand-int (* 100 tx-count)))
-                                                          :name (str (rand-int (* 100 tx-count)))}))))))))
-    (println (format "%s random user datoms in %s transactions generated." (* tx-count 100 2) tx-count))
+    (let [start-time (System/currentTimeMillis)
+          counter (atom 0)]
+      (doall
+       (repeatedly tx-count
+                   (fn []
+                     (d/transact conn (vec
+                                       (repeatedly 1000
+                                                   (fn [] {:age  (long (rand-int (* 100 tx-count)))
+                                                           :name (str (rand-int (* 100 tx-count)))
+                                                           :sibling [{:age  (long (rand-int (* 100 tx-count)))
+                                                                      :name (str (rand-int (* 100 tx-count)))}]}))))
+                     (when (= 0 (mod @counter 10))
+                       (println (format "%s %%" (str (float (* 100.0 (/ @counter tx-count)))))))
+                     (swap! counter inc))))
+      (println (format "%s entities in %s transactions generated." (d/q '[:find (count ?e) . :where [?e _ _ _]] @conn)  tx-count))
+      (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0))))
     (println "Done.")
     true))
 
@@ -85,14 +91,19 @@
   (let [_ (println "Extracting transactions...")
         start-time (System/currentTimeMillis)
         txs (get-txs conn)
-        _ (println "Done.")]
-    (println (format "Writing %s transactions to %s..." (count txs) filename))
+        _ (println "Done.")
+        counter (atom 0)
+        tx-count (count txs)]
+    (println (format "Writing %s transactions to %s..." tx-count filename))
     (with-open [^OutputStream out (io/output-stream (io/file filename))]
       (.write out (cbor/encode (dissoc (:config @conn) :store)))
       (.write out (cbor/encode (:meta @conn)))
       (doseq [{:keys [db/id db/txInstant]} txs]
         (.write out (cbor/encode (into [[id txInstant]]
-                                       (find-tx-datoms conn id))))))
+                                       (find-tx-datoms conn id))))
+        (when (= 0 (mod @counter 10))
+          (println (format "%s %%" (str (float (* 100.0 (/ @counter tx-count)))))))
+        (swap! counter inc)))
     (println (format "Total time: %s secs" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
     (println "Done.")))
 
@@ -112,18 +123,26 @@
   (let [db @conn
         ident-ref-map (:ident-ref-map db)
         attribute-refs? (-> db :config :attribute-refs?)
-        max-eid (atom (inc (:max-eid db)))]
+        max-eid (atom (inc (:max-eid db)))
+        ref-attribute? (or (:db.type/ref (:rschema db)) #{})]
     (reduce (fn [coll [e a v _ added]]
-              (let [new-eid (or (get @ident-map e) @max-eid (d/tempid :db/sys))
+              (let [new-eid (or (get @ident-map e) @max-eid)
+                    _ (when (= new-eid @max-eid)
+                        (swap! ident-map assoc e new-eid)
+                        (swap! max-eid inc))
                     new-aid (if attribute-refs?
                               (get ident-ref-map a)
-                              a)]
-                (swap! ident-map assoc e new-eid)
-                (when (= new-eid @max-eid)
-                  (swap! max-eid inc))
+                              a)
+                    new-v (if (ref-attribute? a)
+                            (or (get @ident-map v) @max-eid)
+                            v)
+                    _ (when (and (ref-attribute? a)
+                                 (= new-v @max-eid))
+                        (swap! ident-map assoc v new-v)
+                        (swap! max-eid inc))]
                 (conj coll (if (true? added)
-                             [:db/add new-eid new-aid v]
-                             [:db/retract new-eid new-aid v]))))
+                             [:db/add new-eid new-aid new-v]
+                             [:db/retract new-eid new-aid new-v]))))
             []
             txs)))
 
@@ -174,7 +193,7 @@
                     :id "export"}
             :keep-history? true
             :schema-flexibility :write
-            :index :datahike.index/hitchhiker-tree
+            :index :datahike.index/persistent-set
             :attribute-refs? true})
 
   (def conn (do
@@ -182,20 +201,25 @@
               (d/create-database cfg)
               (d/connect cfg)))
 
+  (d/delete-database cfg)
+
+  (def cfg (slurp "bb/resources/import-test-config.edn"))
+
   (def conn (d/connect cfg))
 
-  (count @conn)
-
-  (load-test-db {:config cfg :tx-count 10})
+  (load-test-db {:config cfg :tx-count 100})
 
   (get-txs conn)
+
   (find-tx-datoms conn 536870913)
 
   (d/q '{:find  [?e ?a ?v ?t ?s]
-        :in    [$ ?t]
-        :where [[?e ?a ?v ?t ?s]
-                [(not= ?e ?t)]]}
-       (d/history @conn) 536870913)
+         :in    [$ ?t]
+         :where [[?e ?a ?v ?t ?s]
+                 [(not= ?e ?t)]]}
+       (d/history @conn) 536870914)
+
+  (find-tx-datoms conn 536870914)
 
   (export-db {:config cfg
               :filename "db_export2.cbor"})
@@ -207,14 +231,7 @@
              :keep-history? true
              :schema-flexibility :write
              :index :datahike.index/persistent-set
-             :attribute-refs? true})
-
-  (def cfg2 {:store {:backend :file
-                     :path "/tmp/import.dh"}
-             :keep-history? true
-             :schema-flexibility :write
-             :index :datahike.index/persistent-set
-             :attribute-refs? true})
+             :attribute-refs? false})
 
   (d/database-exists? cfg2)
   (d/delete-database cfg2)
@@ -222,9 +239,12 @@
   (import-db {:config cfg2
               :export-file "db_export2.cbor"})
 
+
   (def conn2 (d/connect cfg2))
 
   (:config @conn2)
+  [(take 20 (find-tx-datoms conn 536870914))
+   (take 20 (find-tx-datoms conn2 536870914))]
 
   ;
   )
