@@ -98,7 +98,9 @@
                               a)
                     new-v (if (ref-attribute? a)
                             (or (get @ident-map v) @max-eid)
-                            v)
+                            (if (= java.time.Instant (class v))
+                              (java.util.Date/from v)
+                              v))
                     _ (when (and (ref-attribute? a)
                                  (= new-v @max-eid))
                         (swap! ident-map assoc v new-v)
@@ -122,7 +124,6 @@
       (do
         (println "Importing transactions ...")
         (doseq [[[_tid txInstant] & datoms] txs]
-
           (let [tx-data (prepare-tx-data conn datoms ident-map)
                 tx-meta {:db/txInstant (java.util.Date/from txInstant)}]
             (d/transact conn {:tx-data tx-data
@@ -147,4 +148,3 @@
                    (println "Done.")
                    (d/connect config))]
       (load-db conn export-file))))
-
