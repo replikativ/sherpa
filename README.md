@@ -12,14 +12,18 @@ for example:
 bb migrate 0.3.0 bb/resources/export-test-config.edn bb/resources/import-test-config.edn
 ```
 
-## License
+You can create test data with 1K datoms per transaction:
+```bash
+bb create-test-data <version> <config> <tx-count>
 
-Copyright © 2023 Konrad Kühne
-
-You can create test data with
+```
 
 ```bash
 bb create-test-data 0.3.0 bb/resources/export-test-config.edn 100
 ```
+
+## License
+
+Copyright © 2023 Konrad Kühne
 
 Distributed under the Eclipse Public License version 1.0.
